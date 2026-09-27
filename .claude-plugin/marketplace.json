@@ -1,0 +1,25 @@
+{
+  "name": "claude-speak",
+  "description": "Text-to-speech for Claude Code: spoken summaries of every reply, using a free local TTS model.",
+  "owner": {
+    "name": "Kyle Oliveiro",
+    "url": "https://github.com/kyleoliveiro"
+  },
+  "plugins": [
+    {
+      "name": "claude-speak",
+      "source": "./",
+      "description": "Text-to-speech voice notifications for Claude Code. Summarizes each reply and speaks it aloud with Kokoro, locally and for free.",
+      "category": "productivity",
+      "tags": [
+        "tts",
+        "text-to-speech",
+        "voice",
+        "kokoro",
+        "notifications",
+        "accessibility"
+      ],
+      "homepage": "https://github.com/kyleoliveiro/claude-speak"
+    }
+  ]
+}

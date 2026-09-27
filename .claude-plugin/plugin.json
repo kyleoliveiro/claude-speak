@@ -1,0 +1,62 @@
+{
+  "name": "claude-speak",
+  "version": "0.1.0",
+  "description": "Text-to-speech for Claude Code. Hear a short spoken summary of every reply, voiced by Kokoro, a free local TTS model. No API key, works offline.",
+  "author": {
+    "name": "Kyle Oliveiro",
+    "url": "https://github.com/kyleoliveiro"
+  },
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "tts",
+    "text-to-speech",
+    "voice",
+    "speech",
+    "kokoro",
+    "kokoro-tts",
+    "local-tts",
+    "offline",
+    "voice-notifications",
+    "notifications",
+    "accessibility",
+    "audio"
+  ],
+  "userConfig": {
+    "auto_speak": {
+      "type": "boolean",
+      "title": "Speak every response",
+      "description": "Speak each response aloud as soon as Claude finishes. Turn off to speak only when you run /speak. /speak-auto on|off overrides this.",
+      "default": true
+    },
+    "summarize": {
+      "type": "boolean",
+      "title": "Summarize before speaking",
+      "description": "Speak a one or two sentence summary instead of the whole response. Short responses are always read in full.",
+      "default": true
+    },
+    "voice": {
+      "type": "string",
+      "title": "Voice",
+      "description": "Kokoro voice, e.g. af_heart, af_bella, am_michael, bf_emma, bm_george. See the README for the full list.",
+      "default": "af_heart"
+    },
+    "speed": {
+      "type": "number",
+      "title": "Speaking speed",
+      "description": "1.0 is normal speed.",
+      "default": 1.1,
+      "min": 0.5,
+      "max": 2.0
+    },
+    "summary_model": {
+      "type": "string",
+      "title": "Summary model",
+      "description": "Claude model used to write the spoken summary.",
+      "default": "haiku"
+    }
+  },
+  "homepage": "https://github.com/kyleoliveiro/claude-speak",
+  "repository": "https://github.com/kyleoliveiro/claude-speak"
+}
