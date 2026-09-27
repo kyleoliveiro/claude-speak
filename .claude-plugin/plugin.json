@@ -1,6 +1,6 @@
 {
   "name": "claude-speak",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Text-to-speech for Claude Code. Hear a short spoken summary of every reply, voiced by Kokoro, a free local TTS model. No API key, works offline.",
   "author": {
     "name": "Kyle Oliveiro",
