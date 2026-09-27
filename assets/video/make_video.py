@@ -6,7 +6,8 @@
 #     "imageio-ffmpeg>=0.5",
 # ]
 # ///
-"""Renders the claude-speak promo video to assets/video/claude-speak.mp4.
+"""Renders the claude-speak promo video to assets/video/claude-speak.mp4, and its
+opening frame to assets/video/thumbnail.png for platforms that take a custom poster.
 
   uv run --script assets/video/make_video.py                      # full render
   uv run --script assets/video/make_video.py --stills 2,10.5,20   # preview frames only
@@ -46,6 +47,7 @@ CLIPS = {
     "george": ("bm_george", "And I'm George."),
     "end": ("af_heart", END_LINE),
 }
+INTRO = 2.2   # seconds the title card holds before the story starts
 PROMPT = "fix the flaky auth test"
 CMD1 = "/plugin marketplace add kyleoliveiro/claude-speak"
 CMD2 = "/plugin install claude-speak@claude-speak"
@@ -131,9 +133,13 @@ def build_timeline(clips: dict[str, np.ndarray]) -> dict:
     dur = {k: len(v) / RATE for k, v in clips.items()}
     tl: dict = {"fps": FPS}
 
+    # 0. Title card, fully drawn on the first frame so it doubles as the poster.
+    tl["s0"] = {"start": 0.0, "bars": bars(clips["demo"], 288), "end": INTRO}
+
     # 1. The problem: kinetic type.
-    tl["s1"] = {"start": 0.0, "lines": [0.35, 1.5, 2.65],
-                "ticks": [3.3 + 0.16 * k for k in range(7)], "end": 4.7}
+    o = INTRO - 0.15
+    tl["s1"] = {"start": INTRO, "lines": [o + 0.35, o + 1.5, o + 2.65],
+                "ticks": [o + 3.3 + 0.16 * k for k in range(7)], "end": o + 4.7}
 
     # 2. How it works: Claude works, you leave, it tells you.
     s2 = tl["s1"]["end"]
@@ -307,6 +313,8 @@ def main() -> None:
             browser.close()
             return
 
+        page.evaluate("render(0)")
+        page.screenshot(path=str(HERE / "thumbnail.png"))
         audio = BUILD / "audio.wav"
         write_wav(audio, mix(tl, clips))
         out = HERE / "claude-speak.mp4"

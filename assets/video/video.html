@@ -23,6 +23,16 @@
   .brand { display:flex; align-items:center; gap:18px; } .brand img { width:42px; height:42px; }
   header b, footer b { color:var(--ink); font-weight:500; }
 
+  /* 0 ---------------------------------------------------------------- */
+  #mark0 { left:88px; top:196px; font-size:252px; font-weight:700; letter-spacing:-.058em; line-height:.9; white-space:nowrap; }
+  #tag0 { left:96px; top:500px; font-size:68px; font-weight:600; letter-spacing:-.035em; }
+  #tag0 .serif { font-weight:400; letter-spacing:-.01em; font-size:76px; }
+  #wave0 { left:96px; top:672px; }
+  #wave0 rect { fill:#C9C2B4; } #wave0 rect.on { fill:var(--ink); }
+  #bottom0 { left:96px; right:96px; top:872px; display:flex; justify-content:space-between; align-items:center; }
+  #bottom0 .perks { font-size:19px; color:var(--ink); }
+  #bottom0 .perks i { color:var(--accent); font-style:normal; padding:0 14px; }
+
   /* 1 ---------------------------------------------------------------- */
   #s1 .kin { left:96px; top:300px; }
   #s1 .line { font-size:120px; font-weight:700; letter-spacing:-.045em; line-height:1.1; white-space:nowrap; }
@@ -128,6 +138,13 @@
   <span class="brand"><img src="../icon.svg" alt=""><span><b>Claude Code</b> plugin</span></span>
   <span>kyleoliveiro/claude-speak</span>
 </header>
+
+<section id="s0">
+  <div class="abs" id="mark0">claude<span class="accent">-</span>speak</div>
+  <div class="abs" id="tag0">Claude Code tells you when it’s done. <span class="serif accent">Out loud.</span></div>
+  <div class="abs" id="wave0"></div>
+  <div class="abs" id="bottom0"><span class="mono perks">Free<i>·</i>Runs locally<i>·</i>No API key</span><span class="mono">🔊 Sound on</span></div>
+</section>
 
 <section id="s1">
   <div class="abs kin">
@@ -285,6 +302,7 @@ const S = {};
 function setup(tl) {
   TL = tl;
   document.querySelectorAll('[data-split]').forEach(split);
+  S.wave0 = makeWave($('#wave0'), tl.s0.bars, 1728, 110, 6, 3);
   S.lines = [...document.querySelectorAll('#s1 .line')];
 
   // Scene 2 terminal.
@@ -377,12 +395,16 @@ function rise(el, x, dy = 36, blur = 10) {
 
 function render(t) {
   const tl = TL;
-  $('header').style.opacity = out3(prog(t, .1, .6));
-  $('footer').style.opacity = out3(prog(t, .3, .6));
+  // The title card is the poster frame, so it's fully drawn at t = 0.
+  $('footer').style.opacity = out3(prog(t, tl.s1.start, .6));
   $('#tc').textContent = tc(t);
   const chapters = [['s1', 'The problem'], ['s2', 'How it works'], ['s3', 'Why it’s nice'], ['s4', 'Install'], ['s5', 'claude-speak']];
-  const cur = chapters.filter(([k]) => t >= tl[k].start).pop();
+  const cur = chapters.filter(([k]) => t >= tl[k].start).pop() || chapters[0];
   $('#chapter').innerHTML = `<b>0${chapters.indexOf(cur) + 1}</b> &nbsp;${cur[1]}`;
+
+  // 0. Title card ---------------------------------------------------------
+  scene($('#s0'), t, tl.s0);
+  S.wave0.set(.57);
 
   // 1. The problem -------------------------------------------------------
   const s1 = tl.s1;

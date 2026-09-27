@@ -16,7 +16,7 @@
   It turns each reply into a one-line summary and speaks it with <a href="https://huggingface.co/hexgrad/Kokoro-82M">Kokoro</a>, a small, natural-sounding TTS model that runs locally and offline. No API key needed.
 </p>
 
-https://github.com/user-attachments/assets/ee47eeeb-565b-4383-93de-c6558dbcff10
+https://github.com/user-attachments/assets/ed2a3e8a-e1e1-4d9b-8276-5765847fe57e
 
 <p align="center"><sub>🔊 Turn the sound on. Every voice in the video is claude-speak itself.</sub></p>
 
