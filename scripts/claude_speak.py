@@ -385,10 +385,13 @@ def ensure_server(data: Path, wait: float = 900) -> dict:
     raise RuntimeError(f"the TTS server did not start; see {data / 'server.log'}")
 
 
-def send_to_server(data: Path, text: str, settings: dict) -> None:
+def send_to_server(data: Path, text: str, settings: dict, session: str = "", label: str = "") -> None:
+    """Queue speech. session lets a newer reply replace an older one; label names
+    the project aloud when other sessions are speaking too."""
     ensure_server(data)
     request(data, "POST", "/speak",
-            {"text": text, "voice": settings["voice"], "speed": settings["speed"]})
+            {"text": text, "voice": settings["voice"], "speed": settings["speed"],
+             "session": session, "label": label})
 
 
 def log_error(data: Path, message: str) -> None:
@@ -396,9 +399,11 @@ def log_error(data: Path, message: str) -> None:
         fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
 
 
-def spawn_worker(data: Path, text: str, settings: dict, force_full: bool = False) -> None:
+def spawn_worker(data: Path, text: str, settings: dict, force_full: bool = False,
+                 session: str = "", label: str = "") -> None:
     """Summarize and speak in a detached process so the caller returns immediately."""
-    job = {"text": text, "settings": settings, "force_full": force_full}
+    job = {"text": text, "settings": settings, "force_full": force_full,
+           "session": session, "label": label}
     proc = subprocess.Popen(
         [sys.executable, __file__, "_worker", "--data-dir", str(data)],
         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -445,7 +450,7 @@ def cmd_hook(args) -> None:
     if not isinstance(text, str) or not text.strip():
         text = last_response(Path(transcript))
     if text and not is_own_reply(text):
-        spawn_worker(data, text, settings)
+        spawn_worker(data, text, settings, session=session_id, label=Path(event.get("cwd") or "").name)
 
 
 def cmd_worker(args) -> None:
@@ -457,7 +462,7 @@ def cmd_worker(args) -> None:
             request(data, "POST", "/warm")
         text = prepare(job["text"], job["settings"], job.get("force_full", False))
         if text:
-            send_to_server(data, text, job["settings"])
+            send_to_server(data, text, job["settings"], job.get("session", ""), job.get("label", ""))
     except Exception as exc:  # detached: the log is the only place errors can go
         log_error(data, f"speak failed: {exc}")
 
@@ -488,7 +493,8 @@ def cmd_speak(args) -> None:
     force_full = mode == "full"
     if _safe_id(args.session or ""):
         (data / f"skip-{_safe_id(args.session)}").touch()
-    spawn_worker(data, text, settings, force_full=force_full)
+    spawn_worker(data, text, settings, force_full=force_full,
+                 session=args.session or "", label=Path.cwd().name)
 
     how = "in full" if force_full or not settings["summarize"] else "as a summary"
     note = "" if server_health(data) else " (starting the voice model; the first run downloads it, ~350 MB)"
@@ -574,7 +580,7 @@ def cmd_config(args) -> None:
         sample = f"Hi, I'm {name}. This is how I'll sound when Claude finishes a task."
         if _safe_id(args.session or ""):
             (data / f"skip-{_safe_id(args.session)}").touch()
-        spawn_worker(data, sample, dict(settings, summarize=False))
+        spawn_worker(data, sample, dict(settings, summarize=False), session=args.session or "")
         print("claude-speak: playing a sample of the new voice.")
 
 

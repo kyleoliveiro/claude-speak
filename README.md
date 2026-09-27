@@ -122,7 +122,7 @@ There are also Spanish (`e…`), French (`ff_siwis`), Hindi (`h…`), Italian (`
 
 - A **Stop hook** runs when Claude finishes a response. It returns in about 50 ms and does the rest in a detached background process, so it never slows Claude down.
 - The **summary** is written by a one-off `claude -p` call using your existing Claude Code login, with no tools, MCP servers or extended thinking, so it takes about 3 seconds.
-- The **voice server** is a small Python process (managed by `uv`) that keeps Kokoro loaded and listens on a local Unix socket. It starts on first use, speaks long text sentence by sentence so audio begins right away, interrupts itself when something new arrives, and exits after 30 idle minutes.
+- The **voice server** is a small Python process (managed by `uv`) that keeps Kokoro loaded and listens on a local Unix socket. It starts on first use, speaks long text sentence by sentence so audio begins right away, and exits after 30 idle minutes. When several sessions finish at once they take turns instead of talking over each other, and each reply starts with its project name so you know which one is talking. A newer reply from the same session replaces its older one.
 
 ### Privacy
 

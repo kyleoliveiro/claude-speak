@@ -7,14 +7,15 @@
 # ///
 """claude-speak TTS server: keeps Kokoro loaded and plays speech on request.
 
-Listens for HTTP on a unix socket in the data dir. A new /speak interrupts
-whatever is playing. Exits by itself after a period with nothing to do.
+Listens for HTTP on a unix socket in the data dir. Speech from different
+sessions is queued; a new /speak from the same session replaces its older one.
+Exits by itself after a period with nothing to do.
 
   GET  /health   model, player and voices
-  POST /speak    {"text", "voice", "speed"}; returns at once, plays in the background
+  POST /speak    {"text", "voice", "speed", "session", "label"}; returns at once, plays in turn
   POST /warm     play silence to wake the output device before speech is ready
   POST /synth    same body; returns the whole utterance as a WAV
-  POST /stop     stop playback
+  POST /stop     stop playback and clear the queue
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ import threading
 import time
 import urllib.request
 import wave
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -68,6 +70,10 @@ WARM_SECS = 20
 # Output that went quiet less than this long ago is still awake. PipeWire
 # suspends idle outputs after 5 seconds.
 STAY_AWAKE = 3.0
+
+# While another session has spoken this recently, speech starts with the name
+# of the project it came from.
+OTHERS_ACTIVE = 300.0
 
 
 def log(message: str) -> None:
@@ -130,8 +136,22 @@ def wav_bytes(samples: np.ndarray, rate: int) -> bytes:
     return buf.getvalue()
 
 
+@dataclass
+class Job:
+    session: str
+    text: str
+    voice: str
+    speed: float
+    cancelled: bool = False
+
+
 class Speaker:
-    """Synthesizes and plays one utterance at a time; a new one cancels the old."""
+    """Plays utterances one at a time, in order.
+
+    Sessions take turns: speech from one session waits for another's to finish.
+    A newer utterance from the same session replaces its older one, playing or
+    queued, since that reply is out of date.
+    """
 
     def __init__(self, kokoro: Kokoro, player: list[str] | None, silence: Path):
         self.kokoro = kokoro
@@ -140,7 +160,10 @@ class Speaker:
         self.voices = set(kokoro.get_voices())
         self.synth_lock = threading.Lock()
         self.state_lock = threading.Lock()
-        self.generation = 0
+        self.wake = threading.Condition(self.state_lock)
+        self.queue: list[Job] = []
+        self.current: Job | None = None
+        self.last_seen: dict[str, float] = {}  # session -> last /speak time
         self.proc: subprocess.Popen | None = None
         self.warm_proc: subprocess.Popen | None = None
         self.busy_until = 0.0
@@ -148,6 +171,7 @@ class Speaker:
         self.playing = 0
         self.awake_since = 0.0
         self.quiet_since = 0.0
+        threading.Thread(target=self._loop, daemon=True).start()
 
     def resolve_voice(self, voice: str) -> str:
         return voice if voice in self.voices else "af_heart"
@@ -158,18 +182,27 @@ class Speaker:
             return self.kokoro.create(text, voice=voice, speed=speed,
                                       lang=LANGS.get(voice[:1], "en-us"))
 
-    def stop(self, keep_warm: bool = False) -> None:
+    def stop(self) -> None:
+        """Stop everything: what's playing and what's queued."""
         with self.state_lock:
-            self.generation += 1
+            for job in self.queue:
+                job.cancelled = True
+            self.queue.clear()
+            self._cancel_current()
+            self._end_warm()
             self.busy_until = time.time()
+
+    def _cancel_current(self) -> None:
+        """Call with state_lock held."""
+        if self.current:
+            self.current.cancelled = True
             if self.proc and self.proc.poll() is None:
                 self.proc.terminate()
-            if not keep_warm:
-                self._end_warm()
 
     def warm(self) -> None:
         with self.state_lock:
-            if not self.player or any(p and p.poll() is None for p in (self.proc, self.warm_proc)):
+            if (not self.player or self.current or self.queue
+                    or any(p and p.poll() is None for p in (self.proc, self.warm_proc))):
                 return
             proc = self.warm_proc = self._spawn(self.silence)
         threading.Thread(target=self._reap, args=(proc,), daemon=True).start()
@@ -202,17 +235,39 @@ class Speaker:
             woke = now - self.awake_since if awake else 0.0
         return max(MIN_LEAD_IN, LEAD_IN - woke)
 
-    def speak(self, text: str, voice: str, speed: float) -> None:
-        self.stop(keep_warm=True)
+    def speak(self, text: str, voice: str, speed: float, session: str = "", label: str = "") -> None:
         with self.state_lock:
-            gen = self.generation
-        self.busy_until = time.time() + 3600
-        threading.Thread(target=self._run, args=(gen, text, voice, speed), daemon=True).start()
+            now = time.time()
+            others = any(s != session and now - seen < OTHERS_ACTIVE for s, seen in self.last_seen.items())
+            if session:
+                self.last_seen[session] = now
+            if label and others:
+                text = f"{re.sub(r'[-_.]+', ' ', label)}: {text}"
+            for job in self.queue:
+                job.cancelled |= job.session == session
+            self.queue = [job for job in self.queue if not job.cancelled]
+            if self.current and self.current.session == session:
+                self._cancel_current()
+            self.queue.append(Job(session, text, voice, speed))
+            self.busy_until = now + 3600
+            self.wake.notify()
 
-    def _current(self, gen: int) -> bool:
-        return gen == self.generation
+    def _loop(self) -> None:
+        while True:
+            with self.state_lock:
+                while not self.queue:
+                    self.wake.wait()
+                job = self.current = self.queue.pop(0)
+            try:
+                self._run(job)
+            finally:
+                with self.state_lock:
+                    self.current = None
+                    if not self.queue:
+                        self.busy_until = time.time()
 
-    def _run(self, gen: int, text: str, voice: str, speed: float) -> None:
+    def _run(self, job: Job) -> None:
+        text, voice, speed = job.text, job.voice, job.speed
         if not self.player:
             log("no audio player found (tried afplay, pw-play, paplay, aplay, ffplay)")
             return
@@ -221,7 +276,7 @@ class Speaker:
         def produce():
             try:
                 for i, chunk in enumerate(split_chunks(text)):
-                    if not self._current(gen):
+                    if job.cancelled:
                         break
                     samples, rate = self.synth(chunk, voice, speed)
                     if i == 0:
@@ -240,15 +295,13 @@ class Speaker:
         while (path := clips.get()) is not None:
             try:
                 with self.state_lock:
-                    if not self._current(gen):
+                    if job.cancelled:
                         continue
                     self._end_warm()
                     proc = self.proc = self._spawn(path)
                 self._reap(proc)
             finally:
                 os.unlink(path)
-        if self._current(gen):
-            self.busy_until = time.time()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -294,8 +347,9 @@ class Handler(BaseHTTPRequestHandler):
                 speaker.warm()
                 self._json(202, {"ok": True})
             elif self.path == "/speak" and text:
-                log(f"speak [{voice} x{speed}]: {text[:100]!r}{'...' if len(text) > 100 else ''}")
-                speaker.speak(text, voice, speed)
+                session = str(body.get("session") or "")
+                log(f"speak [{voice} x{speed}] {session[:8] or '-'}: {text[:100]!r}{'...' if len(text) > 100 else ''}")
+                speaker.speak(text, voice, speed, session, str(body.get("label") or ""))
                 self._json(202, {"ok": True})
             elif self.path == "/synth" and text:
                 samples, rate = speaker.synth(text, voice, speed)
