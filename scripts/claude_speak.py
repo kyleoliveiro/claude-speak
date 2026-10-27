@@ -40,8 +40,6 @@ SERVER_SCRIPT = ROOT / "scripts" / "server.py"
 
 # Replies at or under this length are spoken as-is, without a summary.
 SUMMARY_THRESHOLD = 280
-# Cached summaries older than this are deleted when a new one is saved.
-SUMMARY_CACHE_DAYS = 7
 # Upper bound on how much text is read aloud when not summarizing.
 MAX_SPOKEN_CHARS = 3000
 # Marker the /speak skill replies with; never treated as a response to speak.
@@ -214,19 +212,13 @@ def remember_transcript(data: Path, session_id: str, transcript: str) -> None:
     (sessions / _safe_id(session_id)).write_text(transcript)
 
 
-def _summary_file(data: Path, session_id: str) -> Path | None:
-    sid = _safe_id(session_id)
-    return data / "summaries" / f"{sid}.json" if sid else None
-
-
-def cached_summary(data: Path, session_id: str, text: str, model: str) -> str | None:
-    """The summary last spoken for this session, if it was of the same reply.
+def cached_summary(data: Path, text: str, model: str) -> str | None:
+    """The last summary spoken, if it was of this reply.
 
     The Stop hook summarizes only the turn's final message, while /speak reads
     the whole turn from the transcript, which ends with that message.
     """
-    path = _summary_file(data, session_id)
-    record = _read_json(path) if path else {}
+    record = _read_json(data / "last-summary.json")
     source = str(record.get("text", "")).strip()
     if not source or record.get("model") != model or not record.get("summary"):
         return None
@@ -236,19 +228,9 @@ def cached_summary(data: Path, session_id: str, text: str, model: str) -> str | 
     return None
 
 
-def save_summary(data: Path, session_id: str, text: str, model: str, summary: str) -> None:
-    path = _summary_file(data, session_id)
-    if not path:
-        return
-    path.parent.mkdir(exist_ok=True)
-    cutoff = time.time() - SUMMARY_CACHE_DAYS * 86400
-    for old in path.parent.glob("*.json"):
-        try:
-            if old.stat().st_mtime < cutoff:
-                old.unlink()
-        except OSError:
-            pass
-    path.write_text(json.dumps({"model": model, "text": text.strip(), "summary": summary}))
+def save_summary(data: Path, text: str, model: str, summary: str) -> None:
+    (data / "last-summary.json").write_text(
+        json.dumps({"model": model, "text": text.strip(), "summary": summary}))
 
 
 def find_transcript(data: Path, session_id: str) -> Path | None:
@@ -376,16 +358,16 @@ def _ask_claude(system_prompt: str, prompt: str, model: str) -> str | None:
 
 
 def prepare(text: str, settings: dict, force_full: bool = False,
-            data: Path | None = None, session: str = "") -> str:
-    """What to say for text. Summaries are cached per session, so replaying the
-    last response with /speak doesn't ask Claude for the same summary again."""
+            data: Path | None = None) -> str:
+    """What to say for text. The last summary is cached, so replaying the last
+    response with /speak doesn't ask Claude for the same summary again."""
     if settings["summarize"] and not force_full and len(text) > SUMMARY_THRESHOLD:
         model = settings["summary_model"]
-        summary = cached_summary(data, session, text, model) if data else None
+        summary = cached_summary(data, text, model) if data else None
         if summary is None:
             summary = summarize(text, model)
             if summary and data:
-                save_summary(data, session, text, model, summary)
+                save_summary(data, text, model, summary)
         text = summary or text
     return speakable(text)
 
@@ -549,13 +531,12 @@ def cmd_worker(args) -> None:
                             job["rephrase"].get("note", ""))
             if text:
                 # The next /speak or /rephrase starts from what was heard last.
-                save_summary(data, session, job["text"], model, text)
+                save_summary(data, job["text"], model, text)
                 text = speakable(text)
             else:
                 log_error(data, "rephrase failed; speaking the usual summary instead")
         if not text:
-            text = prepare(job["text"], settings, job.get("force_full", False),
-                           data=data, session=session)
+            text = prepare(job["text"], settings, job.get("force_full", False), data=data)
         if text:
             send_to_server(data, text, settings, session, job.get("label", ""))
     except Exception as exc:  # detached: the log is the only place errors can go
@@ -609,7 +590,7 @@ def cmd_rephrase(args) -> None:
 
     settings = _skill_settings(args, data)
     note = " ".join(args.note).strip()
-    previous = cached_summary(data, args.session or "", text, settings["summary_model"])
+    previous = cached_summary(data, text, settings["summary_model"])
     if _safe_id(args.session or ""):
         (data / f"skip-{_safe_id(args.session)}").touch()
     spawn_worker(data, text, settings, session=args.session or "", label=Path.cwd().name,
