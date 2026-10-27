@@ -53,6 +53,8 @@ claude plugin install claude-speak@claude-speak
 
 That's it. The first time it speaks, claude-speak downloads the Kokoro model (about 335 MB) and its Python dependencies, which takes a minute. After that it's instant.
 
+Claude Code sessions that were already running when you installed the plugin don't pick up its hooks, and `/clear` doesn't reload them. Restart them to hear their responses.
+
 ## Usage
 
 With the default settings you don't have to do anything: every time Claude finishes a response, you hear a summary of it.
@@ -123,6 +125,7 @@ There are also Spanish (`e…`), French (`ff_siwis`), Hindi (`h…`), Italian (`
 - A **Stop hook** runs when Claude finishes a response. It returns in about 50 ms and does the rest in a detached background process, so it never slows Claude down.
 - The **summary** is written by a one-off `claude -p` call using your existing Claude Code login, with no tools, MCP servers or extended thinking, so it takes about 3 seconds.
 - The **voice server** is a small Python process (managed by `uv`) that keeps Kokoro loaded and listens on a local Unix socket. It starts on first use, speaks long text sentence by sentence so audio begins right away, and exits after 30 idle minutes. When several sessions finish at once they take turns instead of talking over each other, and each reply starts with its project name so you know which one is talking. A newer reply from the same session replaces its older one.
+- **Headless runs aren't spoken.** Other tools often start `claude -p` or Agent SDK sessions in the background (memory extractors, for example), and those replies aren't yours to hear. To have one of your own scripts spoken, run it with `CLAUDE_SPEAK_HEADLESS=1`.
 
 ### Privacy
 
