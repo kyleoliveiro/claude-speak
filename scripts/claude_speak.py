@@ -7,6 +7,7 @@ long-lived server (server.py) that this client starts on demand with uv.
 Subcommands:
   hook              Stop hook entry point (reads hook JSON on stdin)
   speak             speak the last response of a session (used by /speak)
+  rephrase [NOTE]   say the last response a different way (used by /rephrase)
   auto on|off|toggle|default|status
                     override the auto_speak setting (used by /speak-auto)
   config [--voice V] [--speed S] [--auto on|off] [--summarize on|off] [--reset]
@@ -55,6 +56,20 @@ SUMMARY_PROMPT = (
     "what was done or found, and any question or decision waiting on the developer. "
     "Plain text only: no markdown, code, file paths, URLs or lists. Output only the "
     "words to speak."
+)
+
+REPHRASE_PROMPT = (
+    "You are the voice of a coding assistant. The user message contains, inside "
+    "<reply> tags, a reply the assistant wrote to a developer. It may also contain, "
+    "inside <previous> tags, the spoken summary of that reply the developer just heard "
+    "and found hard to follow, and inside <unclear> tags, the developer's note on what "
+    "was unclear. Say the reply again a different way for a developer who is listening "
+    "rather than reading: plain everyday words, short sentences, one idea per sentence, "
+    "and spell out anything the previous summary took for granted. If there is a note, "
+    "answer it directly, using only what the reply says. At most 60 words, spoken as "
+    "the assistant in the first person, addressing the developer as \"you\". Plain "
+    "text only: no markdown, code, file paths, URLs or lists. Output only the words "
+    "to speak."
 )
 
 # Every voice in Kokoro v1.0 (voices-v1.0.bin).
@@ -329,6 +344,20 @@ def speakable(markdown: str) -> str:
 
 def summarize(text: str, model: str) -> str | None:
     """A spoken summary of text, or None if Claude couldn't write one."""
+    return _ask_claude(SUMMARY_PROMPT, f"<reply>\n{text}\n</reply>", model)
+
+
+def rephrase(text: str, model: str, previous: str | None, note: str) -> str | None:
+    """A clearer spoken summary of text, or None if Claude couldn't write one."""
+    prompt = f"<reply>\n{text}\n</reply>"
+    if previous:
+        prompt += f"\n<previous>\n{previous}\n</previous>"
+    if note:
+        prompt += f"\n<unclear>\n{note}\n</unclear>"
+    return _ask_claude(REPHRASE_PROMPT, prompt, model)
+
+
+def _ask_claude(system_prompt: str, prompt: str, model: str) -> str | None:
     claude = shutil.which("claude")
     if not claude:
         return None
@@ -337,8 +366,8 @@ def summarize(text: str, model: str) -> str | None:
     try:
         result = subprocess.run(
             [claude, "-p", "--model", model, "--tools", "", "--no-session-persistence",
-             "--strict-mcp-config", "--system-prompt", SUMMARY_PROMPT],
-            input=f"<reply>\n{text}\n</reply>", cwd=tempfile.gettempdir(), capture_output=True, text=True, timeout=90, env=env,
+             "--strict-mcp-config", "--system-prompt", system_prompt],
+            input=prompt, cwd=tempfile.gettempdir(), capture_output=True, text=True, timeout=90, env=env,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
@@ -449,10 +478,13 @@ def log_error(data: Path, message: str) -> None:
 
 
 def spawn_worker(data: Path, text: str, settings: dict, force_full: bool = False,
-                 session: str = "", label: str = "") -> None:
-    """Summarize and speak in a detached process so the caller returns immediately."""
+                 session: str = "", label: str = "", rephrase: dict | None = None) -> None:
+    """Summarize and speak in a detached process so the caller returns immediately.
+    rephrase ({"previous", "note"}) asks for a clearer summary instead."""
     job = {"text": text, "settings": settings, "force_full": force_full,
            "session": session, "label": label}
+    if rephrase is not None:
+        job["rephrase"] = rephrase
     proc = subprocess.Popen(
         [sys.executable, __file__, "_worker", "--data-dir", str(data)],
         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -509,10 +541,23 @@ def cmd_worker(args) -> None:
         # Wake the output device while the summary is written, if the server is up.
         if server_health(data):
             request(data, "POST", "/warm")
-        text = prepare(job["text"], job["settings"], job.get("force_full", False),
-                       data=data, session=job.get("session", ""))
+        settings, session = job["settings"], job.get("session", "")
+        text = None
+        if "rephrase" in job:
+            model = settings["summary_model"]
+            text = rephrase(job["text"], model, job["rephrase"].get("previous"),
+                            job["rephrase"].get("note", ""))
+            if text:
+                # The next /speak or /rephrase starts from what was heard last.
+                save_summary(data, session, job["text"], model, text)
+                text = speakable(text)
+            else:
+                log_error(data, "rephrase failed; speaking the usual summary instead")
+        if not text:
+            text = prepare(job["text"], settings, job.get("force_full", False),
+                           data=data, session=session)
         if text:
-            send_to_server(data, text, job["settings"], job.get("session", ""), job.get("label", ""))
+            send_to_server(data, text, settings, session, job.get("label", ""))
     except Exception as exc:  # detached: the log is the only place errors can go
         log_error(data, f"speak failed: {exc}")
 
@@ -549,6 +594,30 @@ def cmd_speak(args) -> None:
     how = "in full" if force_full or not settings["summarize"] else "as a summary"
     note = "" if server_health(data) else " (starting the voice model; the first run downloads it, ~350 MB)"
     print(f"claude-speak: speaking the last response {how}, voice {settings['voice']}{note}.")
+
+
+def cmd_rephrase(args) -> None:
+    data = data_dir(args.data_dir)
+    transcript = find_transcript(data, args.session or "")
+    if not transcript:
+        print("claude-speak: couldn't find this session's transcript.")
+        return
+    text = last_response(transcript)
+    if not text:
+        print("claude-speak: there's no response to rephrase yet.")
+        return
+
+    settings = _skill_settings(args, data)
+    note = " ".join(args.note).strip()
+    previous = cached_summary(data, args.session or "", text, settings["summary_model"])
+    if _safe_id(args.session or ""):
+        (data / f"skip-{_safe_id(args.session)}").touch()
+    spawn_worker(data, text, settings, session=args.session or "", label=Path.cwd().name,
+                 rephrase={"previous": previous, "note": note})
+
+    focus = ", focusing on what you said was unclear" if note else ""
+    note_text = "" if server_health(data) else " (starting the voice model; the first run downloads it, ~350 MB)"
+    print(f"claude-speak: rephrasing the last response{focus}, voice {settings['voice']}{note_text}.")
 
 
 def _source(data: Path, key: str) -> str:
@@ -699,6 +768,10 @@ def main() -> None:
     p.add_argument("--session")
     p.add_argument("mode", nargs="?", help="'full' to skip the summary, 'stop' to stop")
 
+    p = with_voice(sub.add_parser("rephrase"))
+    p.add_argument("--session")
+    p.add_argument("note", nargs="*", help="what was unclear in the last summary")
+
     p = sub.add_parser("auto")
     p.add_argument("--data-dir")
     p.add_argument("action", nargs="?")
@@ -721,7 +794,7 @@ def main() -> None:
         sub.add_parser(name).add_argument("--data-dir")
 
     args, _unknown = parser.parse_known_args()
-    handler = {"hook": cmd_hook, "_worker": cmd_worker, "speak": cmd_speak, "auto": cmd_auto,
+    handler = {"hook": cmd_hook, "_worker": cmd_worker, "speak": cmd_speak, "rephrase": cmd_rephrase, "auto": cmd_auto,
                "config": cmd_config, "say": cmd_say, "stop": cmd_stop, "status": cmd_status, "setup": cmd_setup}[args.cmd]
     try:
         handler(args)
