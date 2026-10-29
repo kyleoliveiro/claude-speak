@@ -420,6 +420,12 @@ def spawn_worker(data: Path, text: str, settings: dict, force_full: bool = False
 def cmd_hook(args) -> None:
     if os.environ.get("CLAUDE_SPEAK_NESTED"):
         return
+    # Headless `claude -p` and Agent SDK runs (other tools' background jobs) set
+    # CLAUDE_CODE_ENTRYPOINT to sdk-cli, sdk-ts or sdk-py. Set CLAUDE_SPEAK_HEADLESS=1
+    # on a run to speak it anyway.
+    if (os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk")
+            and not _as_bool(os.environ.get("CLAUDE_SPEAK_HEADLESS", ""))):
+        return
     try:
         event = json.load(sys.stdin)
     except ValueError:
