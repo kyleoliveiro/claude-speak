@@ -1,0 +1,5 @@
+{"type": "summary", "summary": "meta first line"}
+{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "go"}}
+{"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "Working."}]}}
+{"type": "user", "uuid": "m1", "isMeta": true, "message": {"role": "user", "content": "<system reminder>"}}
+{"type": "assistant", "uuid": "a2", "message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}}

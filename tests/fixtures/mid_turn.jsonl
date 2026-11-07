@@ -1,0 +1,5 @@
+{"type": "summary", "summary": "meta first line"}
+{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "refactor it"}}
+{"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "Reading the module first."}]}}
+{"type": "assistant", "uuid": "a2", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest"}}]}}
+{"type": "user", "uuid": "r1", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "3 passed"}]}}

@@ -1,0 +1,5 @@
+{"type": "summary", "summary": "meta first line"}
+{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "explain the cache"}}
+{"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "The cache keys on session id."}]}}
+{"type": "user", "uuid": "u2", "message": {"role": "user", "content": "/speak"}}
+{"type": "assistant", "uuid": "a2", "message": {"role": "assistant", "content": [{"type": "text", "text": "🔊 Speaking the last reply."}]}}

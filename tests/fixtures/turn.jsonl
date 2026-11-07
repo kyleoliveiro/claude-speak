@@ -1,0 +1,9 @@
+{"type": "summary", "summary": "meta first line"}
+{"type": "user", "uuid": "u0", "message": {"role": "user", "content": "old question"}}
+{"type": "assistant", "uuid": "a0", "message": {"role": "assistant", "content": [{"type": "text", "text": "Old answer."}]}}
+{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "fix the test"}}
+{"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "Looking at it."}]}}
+{"type": "assistant", "uuid": "a2", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest"}}]}}
+{"type": "user", "uuid": "r1", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "3 passed"}]}}
+{"type": "assistant", "uuid": "s1", "message": {"role": "assistant", "content": [{"type": "text", "text": "Subagent chatter."}]}, "isSidechain": true}
+{"type": "assistant", "uuid": "a3", "message": {"role": "assistant", "content": [{"type": "text", "text": "Fixed the race in token refresh; all tests pass."}]}}

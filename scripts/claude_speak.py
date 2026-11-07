@@ -372,8 +372,8 @@ def last_response(transcript: Path) -> str:
 def speakable(markdown: str) -> str:
     """Turn markdown into something that sounds right when read aloud."""
     text = re.sub(r"```.*?(```|$)", " (code block) ", markdown, flags=re.S)
-    text = re.sub(r"^\s*\|?\s*:?-{3,}.*$", "", text, flags=re.M)          # table rules
-    text = re.sub(r"^\s*\|(.*)\|\s*$",
+    text = re.sub(r"^[ \t]*\|?[ \t]*:?-{3,}.*$", "", text, flags=re.M)    # table rules
+    text = re.sub(r"^[ \t]*\|(.*)\|[ \t]*$",
                   lambda m: ", ".join(c.strip() for c in m.group(1).split("|") if c.strip()) + ".",
                   text, flags=re.M)                                        # table rows
     text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)                 # links, images
