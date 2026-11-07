@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,14 +48,25 @@ MAX_SPOKEN_CHARS = 3000
 # Marker the /speak skill replies with; never treated as a response to speak.
 SPEAK_MARKER = "🔊"
 
+# Cue vocabulary for a TalkingHead avatar (see CLAUDE_SPEAK_AVATAR_URL).
+AVATAR_MOODS = ("neutral", "happy", "love", "sad", "angry", "fear", "disgust")
+AVATAR_GESTURES = ("none", "handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug", "namaste")
+CUE = re.compile(r"^\s*\[(\w+)\s+(\w+)\]\s*")
+
 SUMMARY_PROMPT = (
     "You are the voice of a coding assistant. The user message contains, inside "
     "<reply> tags, a reply the assistant just wrote to a developer. Say it out loud "
-    "for a developer who is listening rather than reading: one or two short, natural "
-    "sentences, at most 40 words, spoken as the assistant in the first person "
-    "(\"I fixed...\", \"I found...\"), addressing the developer as \"you\". Cover "
-    "what was done or found, and any question or decision waiting on the developer. "
-    "Plain text only: no markdown, code, file paths, URLs or lists. Output only the "
+    "for a developer who is listening rather than reading: exactly one short, plain "
+    "sentence, at most 20 words, spoken as the assistant in the first person "
+    "(\"I fixed...\", \"I found...\"), addressing the developer as \"you\". Say "
+    "only the outcome. If the reply asks the developer a question or offers options, "
+    "say the question and, when one is marked recommended, which option and why, in "
+    "at most 35 words. Same plain, neutral style every time: no greetings, no "
+    "flourishes. Plain text only: no markdown, code, file paths, URLs or lists. "
+    "Begin with a cue for the talking avatar in square brackets: one mood from "
+    f"{', '.join(AVATAR_MOODS)} and one gesture from {', '.join(AVATAR_GESTURES)}, "
+    "for example [happy thumbup] for success, [neutral handup] for a question, "
+    "[sad shrug] for a failure or something unclear. Output only the cue and the "
     "words to speak."
 )
 
@@ -472,6 +484,31 @@ def send_to_server(data: Path, text: str, settings: dict, session: str = "", lab
              "session": session, "label": label})
 
 
+def send_cue(mood: str, gesture: str) -> None:
+    """Tell a TalkingHead avatar page (agent-avatar) which mood and gesture to show.
+    Only when CLAUDE_SPEAK_AVATAR_URL is set; best effort, never blocks speech."""
+    url = os.environ.get("CLAUDE_SPEAK_AVATAR_URL")
+    if not url or mood not in AVATAR_MOODS or gesture not in AVATAR_GESTURES:
+        return
+    body = json.dumps({"mood": mood, "gesture": gesture}).encode()
+    req = urllib.request.Request(url.rstrip("/") + "/cue", data=body,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=1).close()
+    except OSError:
+        pass
+
+
+def question_text(tool_input: dict) -> str:
+    """AskUserQuestion's questions and options as text for the summarizer."""
+    lines = []
+    for q in tool_input.get("questions") or []:
+        lines.append(f"Question: {q.get('question', '')}")
+        for opt in q.get("options") or []:
+            lines.append(f"- {opt.get('label', '')}: {opt.get('description', '')}")
+    return "\n".join(lines)
+
+
 def log_error(data: Path, message: str) -> None:
     with open(data / "claude-speak.log", "a") as fh:
         fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
@@ -530,6 +567,14 @@ def cmd_hook(args) -> None:
     settings = load_settings(data=data)
     if not settings["auto_speak"]:
         return
+    label = Path(event.get("cwd") or "").name
+    if event.get("hook_event_name") == "PreToolUse":
+        # A question to the user doesn't end the turn, so Stop won't speak it.
+        if event.get("tool_name") == "AskUserQuestion":
+            text = question_text(event.get("tool_input") or {})
+            if text:
+                spawn_worker(data, text, settings, session=session_id, label=label)
+        return
     if not transcript or not Path(transcript).exists():
         return
 
@@ -537,7 +582,7 @@ def cmd_hook(args) -> None:
     if not isinstance(text, str) or not text.strip():
         text = last_response(Path(transcript))
     if text and not is_own_reply(text):
-        spawn_worker(data, text, settings, session=session_id, label=Path(event.get("cwd") or "").name)
+        spawn_worker(data, text, settings, session=session_id, label=label)
 
 
 def cmd_worker(args) -> None:
@@ -562,6 +607,9 @@ def cmd_worker(args) -> None:
         if not text:
             text = prepare(job["text"], settings, job.get("force_full", False),
                            data=data, session=session)
+        if text and (cue := CUE.match(text)):
+            text = text[cue.end():]
+            send_cue(*cue.groups())
         if text:
             send_to_server(data, text, settings, session, job.get("label", ""))
     except Exception as exc:  # detached: the log is the only place errors can go

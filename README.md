@@ -190,3 +190,13 @@ The client (`scripts/claude_speak.py`) is stdlib-only Python. The voice server (
 ## License
 
 [MIT](LICENSE)
+
+## Fork additions (lucaschallamel/claude-speak)
+
+- **Shorter, steadier summaries**: one plain sentence of at most 20 words.
+- **Questions are spoken**: when Claude asks you a question with options (`AskUserQuestion`),
+  a `PreToolUse` hook reads it out, including the recommended option, since `Stop` doesn't
+  fire until you answer.
+- **Avatar cues**: the summary starts with a `[mood gesture]` cue that is never spoken. With
+  `CLAUDE_SPEAK_AVATAR_URL` set (e.g. `http://127.0.0.1:8765`), it is posted to `<url>/cue`
+  for a [TalkingHead](https://github.com/met4citizen/TalkingHead) avatar page to act out.
