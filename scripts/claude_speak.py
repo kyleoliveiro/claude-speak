@@ -48,6 +48,11 @@ MAX_SPOKEN_CHARS = 3000
 # Marker the /speak skill replies with; never treated as a response to speak.
 SPEAK_MARKER = "🔊"
 
+# Mid-turn interjections: speak Claude's latest status line after a tool call, at
+# most this often, and only while nothing else is being spoken.
+INTERJECT_GAP = 15
+TRANSCRIPT_TAIL = 256 * 1024
+
 # Cue vocabulary for a TalkingHead avatar (see CLAUDE_SPEAK_AVATAR_URL).
 AVATAR_MOODS = ("neutral", "happy", "love", "sad", "angry", "fear", "disgust")
 AVATAR_GESTURES = ("none", "handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug", "namaste")
@@ -298,6 +303,42 @@ def _assistant_text(entry: dict) -> str:
         return content
     return "\n".join(b.get("text", "") for b in content or []
                      if isinstance(b, dict) and b.get("type") == "text")
+
+
+def current_status(transcript: Path) -> tuple[str, str]:
+    """(uuid, text) of the latest assistant text in the current turn, from the tail
+    of the transcript so it stays cheap on long sessions."""
+    with transcript.open("rb") as fh:
+        fh.seek(max(0, transcript.stat().st_size - TRANSCRIPT_TAIL))
+        lines = fh.read().decode("utf-8", "replace").splitlines()[1:]
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("isSidechain"):
+            continue
+        if _is_user_prompt(entry):
+            break
+        if entry.get("type") == "assistant" and (text := _assistant_text(entry).strip()):
+            return entry.get("uuid", ""), text
+    return "", ""
+
+
+def maybe_interject(data: Path, session_id: str, transcript: Path, settings: dict, label: str) -> None:
+    """Speak a new mid-turn status line, if one appeared and the voice is free."""
+    state = data / f"interject-{_safe_id(session_id)}"
+    last = _read_json(state)
+    if time.time() - last.get("at", 0) < INTERJECT_GAP:
+        return
+    uuid, text = current_status(transcript)
+    if not text or uuid == last.get("uuid") or is_own_reply(text):
+        return
+    health = server_health(data)  # don't start the server from every tool call
+    if not health or health.get("busy"):
+        return
+    state.write_text(json.dumps({"uuid": uuid, "at": time.time()}))
+    spawn_worker(data, text, settings, session=session_id, label=label)
 
 
 def last_response(transcript: Path) -> str:
@@ -556,6 +597,22 @@ def cmd_hook(args) -> None:
     if event.get("hook_event_name") == "SessionStart":
         return
 
+    settings = load_settings(data=data)
+    if not settings["auto_speak"]:
+        return
+    label = Path(event.get("cwd") or "").name
+    if event.get("hook_event_name") == "PostToolUse":
+        if (transcript and Path(transcript).exists()
+                and _as_bool(os.environ.get("CLAUDE_SPEAK_INTERJECT", "1"))):
+            maybe_interject(data, session_id, Path(transcript), settings, label)
+        return
+    if event.get("hook_event_name") == "PreToolUse":
+        # A question to the user doesn't end the turn, so Stop won't speak it.
+        if event.get("tool_name") == "AskUserQuestion":
+            text = question_text(event.get("tool_input") or {})
+            if text:
+                spawn_worker(data, text, settings, session=session_id, label=label)
+        return
     # /speak already spoke; don't also speak its acknowledgement.
     skip = data / f"skip-{_safe_id(session_id)}"
     if skip.exists():
@@ -564,17 +621,6 @@ def cmd_hook(args) -> None:
         if recent:
             return
 
-    settings = load_settings(data=data)
-    if not settings["auto_speak"]:
-        return
-    label = Path(event.get("cwd") or "").name
-    if event.get("hook_event_name") == "PreToolUse":
-        # A question to the user doesn't end the turn, so Stop won't speak it.
-        if event.get("tool_name") == "AskUserQuestion":
-            text = question_text(event.get("tool_input") or {})
-            if text:
-                spawn_worker(data, text, settings, session=session_id, label=label)
-        return
     if not transcript or not Path(transcript).exists():
         return
 

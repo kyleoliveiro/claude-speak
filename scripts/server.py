@@ -328,7 +328,8 @@ class Handler(BaseHTTPRequestHandler):
             speaker = self.server.speaker
             self._json(200, {"ok": True, "model": self.server.model_name,
                              "player": " ".join(speaker.player or ["none"]),
-                             "voices": sorted(speaker.voices)})
+                             "voices": sorted(speaker.voices),
+                             "busy": time.time() < speaker.busy_until})
         else:
             self._json(404, {"error": "not found"})
 

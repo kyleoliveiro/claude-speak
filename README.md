@@ -200,3 +200,6 @@ The client (`scripts/claude_speak.py`) is stdlib-only Python. The voice server (
 - **Avatar cues**: the summary starts with a `[mood gesture]` cue that is never spoken. With
   `CLAUDE_SPEAK_AVATAR_URL` set (e.g. `http://127.0.0.1:8765`), it is posted to `<url>/cue`
   for a [TalkingHead](https://github.com/met4citizen/TalkingHead) avatar page to act out.
+- **Interjections**: after each tool call, a `PostToolUse` hook speaks Claude's latest
+  mid-turn status line, at most every 15 seconds and only while nothing else is playing.
+  Set `CLAUDE_SPEAK_INTERJECT=0` to turn this off.
