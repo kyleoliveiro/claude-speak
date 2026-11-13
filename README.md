@@ -158,6 +158,7 @@ These environment variables go in your shell profile, or under `env` in `~/.clau
 | `CLAUDE_SPEAK_IDLE_TIMEOUT` | `1800` | Seconds before the idle voice server exits. |
 | `CLAUDE_SPEAK_PLAYER` | auto | Audio player command, e.g. `mpv --really-quiet`. |
 | `CLAUDE_SPEAK_LEAD_IN` | `2.0` | Seconds a sleeping output device (e.g. Bluetooth) gets to wake up before speech starts. claude-speak wakes it while the summary is written, so this usually adds no delay. Raise it if the start is still cut off, or lower it for wired speakers. |
+| `CLAUDE_SPEAK_DICTATION_STATE` | `$XDG_RUNTIME_DIR/voxtype/state` | Dictation state file. When it changes from `idle` to anything else, speech stops so Claude doesn't talk over you. No file, no watching. |
 
 The voice server uses about 800 MB of RAM with the default model while it's running.
 
@@ -203,3 +204,6 @@ The client (`scripts/claude_speak.py`) is stdlib-only Python. The voice server (
 - **Interjections**: after each tool call, a `PostToolUse` hook speaks Claude's latest
   mid-turn status line, at most every 15 seconds and only while nothing else is playing.
   Set `CLAUDE_SPEAK_INTERJECT=0` to turn this off.
+- **Barge-in**: speech stops the moment you start dictating with
+  [voxtype](https://github.com/peteonrails/voxtype) (needs `state_file = "auto"` in its config).
+  Point `CLAUDE_SPEAK_DICTATION_STATE` at another state file to use a different tool.

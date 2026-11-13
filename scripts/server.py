@@ -75,6 +75,11 @@ STAY_AWAKE = 3.0
 # of the project it came from.
 OTHERS_ACTIVE = 300.0
 
+# Dictation state file (voxtype's default). Speech stops when it leaves "idle",
+# so Claude never talks over the user.
+DICTATION_STATE = os.environ.get("CLAUDE_SPEAK_DICTATION_STATE") or os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid()), "voxtype", "state")
+
 
 def log(message: str) -> None:
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}", flush=True)
@@ -379,6 +384,23 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.last_used = time.time()
 
 
+def watch_dictation(path: Path, stop, interval: float = 0.1) -> None:
+    """Call stop() each time the dictation state turns from idle to anything else.
+
+    Exact names of the busy states are not relied on; a missing file reads as idle.
+    """
+    was_idle = True
+    while True:
+        try:
+            idle = path.read_text().strip() in ("", "idle")
+        except OSError:
+            idle = True
+        if was_idle and not idle:
+            stop()
+        was_idle = idle
+        time.sleep(interval)
+
+
 def socket_in_use(path: Path) -> bool:
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -431,6 +453,10 @@ def main() -> None:
                 return
 
     threading.Thread(target=idle_watch, daemon=True).start()
+    dictation = Path(DICTATION_STATE)
+    if dictation.is_file():
+        threading.Thread(target=watch_dictation, args=(dictation, speaker.stop), daemon=True).start()
+        log(f"watching dictation state {dictation}")
     log(f"listening on {sock}")
     try:
         server.serve_forever()

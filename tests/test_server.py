@@ -4,7 +4,9 @@ Run: python3 -m unittest discover tests
 """
 
 import sys
+import tempfile
 import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -91,6 +93,31 @@ class SpeakerQueueTest(unittest.TestCase):
         sp = speaker()
         self.assertEqual(sp.resolve_voice("bm_george"), "bm_george")
         self.assertEqual(sp.resolve_voice("xx_nobody"), "af_heart")
+
+
+class WatchDictationTest(unittest.TestCase):
+    def test_stops_once_per_press_and_ignores_missing_file(self):
+        state = Path(tempfile.mkdtemp()) / "state"
+        stops = []
+        threading.Thread(target=server.watch_dictation,
+                         args=(state, lambda: stops.append(1), 0.005), daemon=True).start()
+
+        def settle(text):
+            if text is None:
+                state.unlink(missing_ok=True)
+            else:
+                state.write_text(text)
+            time.sleep(0.05)
+
+        settle(None)
+        settle("idle\n")
+        self.assertEqual(stops, [])
+        settle("recording\n")
+        settle("transcribing\n")
+        self.assertEqual(len(stops), 1)
+        settle("idle\n")
+        settle("recording")
+        self.assertEqual(len(stops), 2)
 
 
 if __name__ == "__main__":
